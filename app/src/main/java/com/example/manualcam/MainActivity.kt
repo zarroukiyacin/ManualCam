@@ -12,8 +12,11 @@ import android.media.ImageReader
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.provider.MediaStore
 import android.util.Size
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.Surface
 import android.view.TextureView
 import android.widget.Button
@@ -25,6 +28,7 @@ import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.ln
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -38,6 +42,8 @@ class MainActivity : Activity() {
     private lateinit var isoLabel: TextView
     private lateinit var shutterLabel: TextView
     private lateinit var brightLabel: TextView
+    private lateinit var zoomLabel: TextView
+    private lateinit var autoBtn: Button
 
     private var cameraDevice: CameraDevice? = null
     private var session: CameraCaptureSession? = null
@@ -45,6 +51,7 @@ class MainActivity : Activity() {
     private var imageReader: ImageReader? = null
     private var thread: HandlerThread? = null
     private var handler: Handler? = null
+    private val ui = Handler(Looper.getMainLooper())
 
     private var cameraReady = false
     private var cameraId = ""
@@ -60,6 +67,19 @@ class MainActivity : Activity() {
     @Volatile private var exposureNs = 16_666_666L
     @Volatile private var brightness = 0 // -100..+100  => -2..+2 EV
 
+    // Zoom / déplacement (recadrage numérique du capteur)
+    private var activeRect = Rect(0, 0, 4000, 3000)
+    private var maxZoom = 1f
+    @Volatile private var zoom = 1f
+    @Volatile private var centerX = 2000f
+    @Volatile private var centerY = 1500f
+    private var lastX = 0f
+    private var lastY = 0f
+    private lateinit var scaleDetector: ScaleGestureDetector
+
+    // Mode automatique
+    private var autoOn = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -71,7 +91,10 @@ class MainActivity : Activity() {
         isoLabel = findViewById(R.id.isoLabel)
         shutterLabel = findViewById(R.id.shutterLabel)
         brightLabel = findViewById(R.id.brightLabel)
+        zoomLabel = findViewById(R.id.zoomLabel)
+        autoBtn = findViewById(R.id.autoBtn)
         findViewById<Button>(R.id.shutterBtn).setOnClickListener { takePhoto() }
+        autoBtn.setOnClickListener { toggleAuto() }
 
         cameraReady = try { loadCharacteristics() } catch (e: Exception) { false }
         if (!cameraReady) {
@@ -87,8 +110,7 @@ class MainActivity : Activity() {
         iso = 100.coerceIn(isoMin, isoMax)
         exposureNs = 16_666_666L.coerceIn(expMin, expMax)
         isoSeek.progress = iso - isoMin
-        shutterSeek.progress =
-            (ln(exposureNs.toDouble() / expMin) / ln(expMax.toDouble() / expMin) * 1000).roundToInt()
+        shutterSeek.progress = shutterToProgress(exposureNs)
         brightSeek.progress = 100
         updateLabels()
 
@@ -99,6 +121,32 @@ class MainActivity : Activity() {
         }
         brightSeek.onChange { brightness = it - 100; updateLabels(); applyBrightnessPreview() }
         applyBrightnessPreview()
+
+        // Pincer = zoom, un doigt = déplacer la zone zoomée
+        scaleDetector = ScaleGestureDetector(this,
+            object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                override fun onScale(d: ScaleGestureDetector): Boolean {
+                    zoom = (zoom * d.scaleFactor).coerceIn(1f, maxZoom)
+                    updateLabels(); updatePreview()
+                    return true
+                }
+            })
+        textureView.setOnTouchListener { _, ev ->
+            scaleDetector.onTouchEvent(ev)
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { lastX = ev.x; lastY = ev.y }
+                MotionEvent.ACTION_MOVE ->
+                    if (ev.pointerCount == 1 && !scaleDetector.isInProgress && zoom > 1f) {
+                        pan(ev.x - lastX, ev.y - lastY)
+                        lastX = ev.x; lastY = ev.y
+                    }
+                MotionEvent.ACTION_POINTER_UP -> {
+                    val i = if (ev.actionIndex == 0) 1 else 0
+                    lastX = ev.getX(i); lastY = ev.getY(i)
+                }
+            }
+            true
+        }
 
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.CAMERA), 1)
@@ -122,6 +170,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        if (autoOn) toggleAuto()
         closeCamera()
         thread?.quitSafely()
         try { thread?.join() } catch (_: InterruptedException) {}
@@ -132,11 +181,14 @@ class MainActivity : Activity() {
 
     // ---------- Réglages ----------
 
+    private fun shutterToProgress(ns: Long): Int =
+        (ln(ns.toDouble() / expMin) / ln(expMax.toDouble() / expMin) * 1000).roundToInt().coerceIn(0, 1000)
+
     private fun updateLabels() {
         isoLabel.text = "ISO  $iso"
         shutterLabel.text = "Vitesse d'obturation  " + fmtShutter(exposureNs)
-        val ev = brightness / 50f
-        brightLabel.text = String.format(Locale.US, "Luminosité  %+.1f EV", ev)
+        brightLabel.text = String.format(Locale.US, "Luminosité  %+.1f EV", brightness / 50f)
+        zoomLabel.text = String.format(Locale.US, "Zoom x%.1f", zoom)
     }
 
     private fun fmtShutter(ns: Long): String {
@@ -161,12 +213,31 @@ class MainActivity : Activity() {
         })
     }
 
+    private fun cropRect(): Rect {
+        val w = (activeRect.width() / zoom).toInt()
+        val h = (activeRect.height() / zoom).toInt()
+        val l = (centerX - w / 2f).toInt().coerceIn(activeRect.left, activeRect.right - w)
+        val t = (centerY - h / 2f).toInt().coerceIn(activeRect.top, activeRect.bottom - h)
+        centerX = l + w / 2f
+        centerY = t + h / 2f
+        return Rect(l, t, l + w, t + h)
+    }
+
+    private fun pan(dx: Float, dy: Float) {
+        val r = cropRect()
+        val s = if (sensorOrientation == 270) -1f else 1f
+        centerY += s * dx * r.height() / textureView.width
+        centerX -= s * dy * r.width() / textureView.height
+        updatePreview()
+    }
+
     private fun applyManual(b: CaptureRequest.Builder) {
         b.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
         b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
         b.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
         b.set(CaptureRequest.SENSOR_SENSITIVITY, iso)
         b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureNs)
+        b.set(CaptureRequest.SCALER_CROP_REGION, cropRect())
     }
 
     private fun updatePreview() {
@@ -176,6 +247,68 @@ class MainActivity : Activity() {
             applyManual(b)
             s.setRepeatingRequest(b.build(), null, handler)
         } catch (_: Exception) {}
+    }
+
+    // ---------- Mode AUTO (soleil + filtre) ----------
+
+    private val autoRunnable = object : Runnable {
+        override fun run() {
+            if (!autoOn) return
+            autoStep()
+            ui.postDelayed(this, maxOf(350L, exposureNs / 1_000_000L * 2 + 250L))
+        }
+    }
+
+    private fun toggleAuto() {
+        autoOn = !autoOn
+        autoBtn.text = if (autoOn) "AUTO ☀ : ACTIF" else "AUTO ☀"
+        isoSeek.isEnabled = !autoOn
+        shutterSeek.isEnabled = !autoOn
+        brightSeek.isEnabled = !autoOn
+        if (autoOn) {
+            brightSeek.progress = 100 // luminosité neutre
+            ui.post(autoRunnable)
+        } else {
+            ui.removeCallbacks(autoRunnable)
+        }
+    }
+
+    /** Mesure les pixels les plus brillants (le disque solaire) et ajuste ISO/vitesse
+     *  pour les amener à ~78 % sans les brûler. ISO au minimum tant que possible. */
+    private fun autoStep() {
+        val w = 160
+        val h = 120
+        val bmp = textureView.getBitmap(w, h) ?: return
+        val px = IntArray(w * h)
+        bmp.getPixels(px, 0, w, 0, 0, w, h)
+        bmp.recycle()
+        val lum = FloatArray(px.size) { i ->
+            val c = px[i]
+            0.299f * ((c shr 16) and 255) + 0.587f * ((c shr 8) and 255) + 0.114f * (c and 255)
+        }
+        lum.sort()
+        val n = 12
+        var sum = 0f
+        for (i in lum.size - n until lum.size) sum += lum[i]
+        val measured = (sum / n).coerceAtLeast(1f)
+
+        val ratio = (200f / measured).toDouble().pow(2.2) // vers le linéaire
+        val step = ratio.pow(0.7).coerceIn(0.2, 5.0)       // amorti
+        if (abs(ln(step)) < 0.06) return                   // assez proche : on ne bouge plus
+
+        val e = iso.toDouble() * exposureNs * step          // "quantité de lumière" ISO x temps
+        var newIso = isoMin
+        var t = e / newIso
+        if (t > expMax) {
+            t = expMax.toDouble()
+            newIso = (e / t).roundToInt().coerceIn(isoMin, isoMax)
+        }
+        t = t.coerceIn(expMin.toDouble(), expMax.toDouble())
+        iso = newIso
+        exposureNs = t.toLong()
+        isoSeek.progress = iso - isoMin
+        shutterSeek.progress = shutterToProgress(exposureNs)
+        updateLabels(); updatePreview()
     }
 
     // ---------- Caméra ----------
@@ -198,6 +331,10 @@ class MainActivity : Activity() {
             sensorOrientation = c.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
             isoMin = isoR.lower; isoMax = isoR.upper
             expMin = expR.lower; expMax = minOf(expR.upper, 1_000_000_000L)
+            activeRect = c.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) ?: Rect(0, 0, 4000, 3000)
+            maxZoom = minOf(c.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f, 10f)
+            centerX = activeRect.exactCenterX()
+            centerY = activeRect.exactCenterY()
             previewSize = pickSize(map.getOutputSizes(SurfaceTexture::class.java), Int.MAX_VALUE, 1920)
             jpegSize = pickSize(map.getOutputSizes(ImageFormat.JPEG), 9_000_000, Int.MAX_VALUE)
             return true
