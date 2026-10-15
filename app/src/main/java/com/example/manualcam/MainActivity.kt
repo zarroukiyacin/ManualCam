@@ -3,12 +3,19 @@ package com.example.manualcam
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ContentUris
 import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.*
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.InsetDrawable
+import android.graphics.drawable.LayerDrawable
+import android.graphics.drawable.StateListDrawable
 import android.hardware.camera2.*
 import android.media.ExifInterface
 import android.media.ImageReader
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
@@ -19,7 +26,10 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.Surface
 import android.view.TextureView
+import android.view.View
+import android.view.WindowManager
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -44,6 +54,9 @@ class MainActivity : Activity() {
     private lateinit var brightLabel: TextView
     private lateinit var zoomLabel: TextView
     private lateinit var autoBtn: Button
+    private lateinit var thumb: ImageView
+    private var lastUri: Uri? = null
+    private val amber = Color.parseColor("#FFB300")
 
     private var cameraDevice: CameraDevice? = null
     private var session: CameraCaptureSession? = null
@@ -93,8 +106,30 @@ class MainActivity : Activity() {
         brightLabel = findViewById(R.id.brightLabel)
         zoomLabel = findViewById(R.id.zoomLabel)
         autoBtn = findViewById(R.id.autoBtn)
-        findViewById<Button>(R.id.shutterBtn).setOnClickListener { takePhoto() }
+        thumb = findViewById(R.id.thumb)
+        val shutter = findViewById<View>(R.id.shutterBtn)
+        shutter.setOnClickListener { takePhoto() }
         autoBtn.setOnClickListener { toggleAuto() }
+        thumb.setOnClickListener { openLastPhoto() }
+
+        // Look moderne : barres noires, écran toujours allumé, éléments arrondis
+        window.statusBarColor = Color.BLACK
+        window.navigationBarColor = Color.BLACK
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        val r = dp(28).toFloat()
+        findViewById<View>(R.id.panel).background = GradientDrawable().apply {
+            setColor(Color.parseColor("#F2121212"))
+            cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
+        }
+        zoomLabel.background = rounded(Color.parseColor("#99000000"), 16f)
+        thumb.background = rounded(Color.parseColor("#222222"), 14f, Color.parseColor("#66FFFFFF"), 2)
+        thumb.clipToOutline = true
+        shutter.background = StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), shutterDrawable(amber))
+            addState(intArrayOf(), shutterDrawable(Color.WHITE))
+        }
+        styleAuto()
+        loadLastThumbnail()
 
         cameraReady = try { loadCharacteristics() } catch (e: Exception) { false }
         if (!cameraReady) {
@@ -185,10 +220,10 @@ class MainActivity : Activity() {
         (ln(ns.toDouble() / expMin) / ln(expMax.toDouble() / expMin) * 1000).roundToInt().coerceIn(0, 1000)
 
     private fun updateLabels() {
-        isoLabel.text = "ISO  $iso"
-        shutterLabel.text = "Vitesse d'obturation  " + fmtShutter(exposureNs)
-        brightLabel.text = String.format(Locale.US, "Luminosité  %+.1f EV", brightness / 50f)
-        zoomLabel.text = String.format(Locale.US, "Zoom x%.1f", zoom)
+        isoLabel.text = "$iso"
+        shutterLabel.text = fmtShutter(exposureNs)
+        brightLabel.text = String.format(Locale.US, "%+.1f EV", brightness / 50f)
+        zoomLabel.text = String.format(Locale.US, "🔍 x%.1f", zoom)
     }
 
     private fun fmtShutter(ns: Long): String {
@@ -261,10 +296,12 @@ class MainActivity : Activity() {
 
     private fun toggleAuto() {
         autoOn = !autoOn
-        autoBtn.text = if (autoOn) "AUTO ☀ : ACTIF" else "AUTO ☀"
-        isoSeek.isEnabled = !autoOn
-        shutterSeek.isEnabled = !autoOn
-        brightSeek.isEnabled = !autoOn
+        autoBtn.text = if (autoOn) "AUTO ☀ ON" else "AUTO ☀"
+        styleAuto()
+        for (sb in listOf(isoSeek, shutterSeek, brightSeek)) {
+            sb.isEnabled = !autoOn
+            sb.alpha = if (autoOn) 0.4f else 1f
+        }
         if (autoOn) {
             brightSeek.progress = 100 // luminosité neutre
             ui.post(autoRunnable)
@@ -464,9 +501,88 @@ class MainActivity : Activity() {
             values.clear()
             values.put(MediaStore.Images.Media.IS_PENDING, 0)
             contentResolver.update(uri, values, null, null)
-            toast("Photo enregistrée dans Pictures/ManualCam")
+            lastUri = uri
+            showThumb(uri)
+            toast("Photo enregistrée")
         } catch (e: Exception) {
             toast("Erreur d'enregistrement : ${e.message}")
+        }
+    }
+
+    // ---------- Interface : aides ----------
+
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    private fun rounded(fill: Int, radiusDp: Float, stroke: Int = 0, strokeDp: Int = 0): GradientDrawable =
+        GradientDrawable().apply {
+            setColor(fill)
+            cornerRadius = radiusDp * resources.displayMetrics.density
+            if (strokeDp > 0) setStroke(dp(strokeDp), stroke)
+        }
+
+    private fun oval(fill: Int, stroke: Int = 0, strokeDp: Int = 0): GradientDrawable =
+        GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(fill)
+            if (strokeDp > 0) setStroke(dp(strokeDp), stroke)
+        }
+
+    private fun shutterDrawable(inner: Int) = LayerDrawable(arrayOf(
+        oval(Color.TRANSPARENT, Color.WHITE, 4),
+        InsetDrawable(oval(inner), dp(8))
+    ))
+
+    private fun styleAuto() {
+        if (autoOn) {
+            autoBtn.background = rounded(amber, 24f)
+            autoBtn.setTextColor(Color.BLACK)
+        } else {
+            autoBtn.background = rounded(Color.parseColor("#26FFFFFF"), 24f, Color.parseColor("#55FFFFFF"), 1)
+            autoBtn.setTextColor(Color.WHITE)
+        }
+    }
+
+    // ---------- Miniature de la dernière photo ----------
+
+    private fun showThumb(uri: Uri) {
+        Thread {
+            try {
+                val bmp = contentResolver.loadThumbnail(uri, Size(240, 240), null)
+                runOnUiThread { thumb.setImageBitmap(bmp) }
+            } catch (_: Exception) {}
+        }.start()
+    }
+
+    private fun loadLastThumbnail() {
+        Thread {
+            try {
+                contentResolver.query(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    arrayOf(MediaStore.Images.Media._ID),
+                    MediaStore.Images.Media.RELATIVE_PATH + " LIKE ?",
+                    arrayOf("Pictures/ManualCam%"),
+                    MediaStore.Images.Media.DATE_ADDED + " DESC"
+                )?.use { c ->
+                    if (c.moveToFirst()) {
+                        val uri = ContentUris.withAppendedId(
+                            MediaStore.Images.Media.EXTERNAL_CONTENT_URI, c.getLong(0))
+                        lastUri = uri
+                        showThumb(uri)
+                    }
+                }
+            } catch (_: Exception) {}
+        }.start()
+    }
+
+    private fun openLastPhoto() {
+        val u = lastUri
+        if (u == null) { toast("Aucune photo pour le moment"); return }
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW)
+                .setDataAndType(u, "image/jpeg")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        } catch (e: Exception) {
+            toast("Aucune application pour ouvrir la photo")
         }
     }
 
