@@ -21,69 +21,162 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="top|start"
-            android:layout_margin="12dp"
-            android:background="#80000000"
-            android:padding="6dp"
-            android:textColor="#FFFFFF" />
+            android:layout_margin="14dp"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="6dp"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
     </FrameLayout>
 
     <LinearLayout
+        android:id="@+id/panel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
-
-        <TextView
-            android:id="@+id/isoLabel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="#FFFFFF" />
-        <SeekBar
-            android:id="@+id/isoSeek"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <TextView
-            android:id="@+id/shutterLabel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:textColor="#FFFFFF" />
-        <SeekBar
-            android:id="@+id/shutterSeek"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
-
-        <TextView
-            android:id="@+id/brightLabel"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:textColor="#FFFFFF" />
-        <SeekBar
-            android:id="@+id/brightSeek"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content" />
+        android:paddingHorizontal="22dp"
+        android:paddingTop="18dp"
+        android:paddingBottom="20dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="0dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="ISO"
+                android:textColor="#B3FFFFFF"
+                android:textSize="13sp" />
+            <TextView
+                android:id="@+id/isoLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#FFB300"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+        <SeekBar
+            android:id="@+id/isoSeek"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:progressBackgroundTint="#44FFFFFF"
+            android:progressTint="#FFB300"
+            android:thumbTint="#FFB300" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Obturation"
+                android:textColor="#B3FFFFFF"
+                android:textSize="13sp" />
+            <TextView
+                android:id="@+id/shutterLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#FFB300"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+        <SeekBar
+            android:id="@+id/shutterSeek"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:progressBackgroundTint="#44FFFFFF"
+            android:progressTint="#FFB300"
+            android:thumbTint="#FFB300" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Luminosité"
+                android:textColor="#B3FFFFFF"
+                android:textSize="13sp" />
+            <TextView
+                android:id="@+id/brightLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#FFB300"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+        <SeekBar
+            android:id="@+id/brightSeek"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:progressBackgroundTint="#44FFFFFF"
+            android:progressTint="#FFB300"
+            android:thumbTint="#FFB300" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <Button
-                android:id="@+id/autoBtn"
+            <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="AUTO ☀" />
+                android:layout_weight="1">
+                <ImageView
+                    android:id="@+id/thumb"
+                    android:layout_width="60dp"
+                    android:layout_height="60dp"
+                    android:layout_gravity="start|center_vertical"
+                    android:contentDescription="Dernière photo"
+                    android:scaleType="centerCrop" />
+            </FrameLayout>
 
-            <Button
-                android:id="@+id/shutterBtn"
+            <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="PHOTO" />
+                android:layout_weight="1">
+                <View
+                    android:id="@+id/shutterBtn"
+                    android:layout_width="76dp"
+                    android:layout_height="76dp"
+                    android:layout_gravity="center"
+                    android:clickable="true"
+                    android:contentDescription="Prendre la photo" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1">
+                <Button
+                    android:id="@+id/autoBtn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="end|center_vertical"
+                    android:minHeight="0dp"
+                    android:minWidth="0dp"
+                    android:paddingHorizontal="18dp"
+                    android:paddingVertical="12dp"
+                    android:stateListAnimator="@null"
+                    android:text="AUTO ☀"
+                    android:textColor="#FFFFFF"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+            </FrameLayout>
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>
